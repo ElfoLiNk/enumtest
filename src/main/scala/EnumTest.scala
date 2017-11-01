@@ -17,27 +17,30 @@ object PolicyTypeViewItem extends Enumeration {
 
 case class PolicyViewItem1(id: Long = 0,
                            name: String,
-                           policyType: String //PolicyTypeViewItem,
-) extends KeyedEntity[Long]
+                           policyType: String, //PolicyTypeViewItem
+                           maybePolicyType: Option[String])
+    extends KeyedEntity[Long]
 
 case class PolicyViewItem2(
     id: Long = 0,
     name: String,
-    policyType: PolicyTypeViewItem
+    policyType: PolicyTypeViewItem,
+    maybePolicyType: Option[PolicyTypeViewItem]
 ) extends KeyedEntity[Long] {
 
   def this() = this(
     id = 0L,
     name = "",
-    policyType = PolicyTypeViewItem.Fixed
+    policyType = PolicyTypeViewItem.Fixed,
+    maybePolicyType = None
   )
 }
 
-trait MyTypes extends PrimitiveTypeMode {
+object MyTypes extends PrimitiveTypeMode {
   // ====== Read/Write Enums as string ======
 
   def enumValueTEF[A >: Enumeration#Value <: Enumeration#Value](
-      ev: Enumeration#Value) = {
+      ev: Enumeration#Value) =
     new JdbcMapper[String, A] with TypedExpressionFactory[A, TEnumValue[A]] {
       val enu = Utils.enumerationForValue(ev)
       def extractNativeJdbcValue(rs: ResultSet, i: Int) = rs.getString(i)
@@ -53,15 +56,29 @@ trait MyTypes extends PrimitiveTypeMode {
         // jdbc.wasNull will get sorted out by optionEnumValueTEF)
       }
     }
-  }
+
+  def optionEnumValueTEF[A >: Enumeration#Value <: Enumeration#Value](
+      ev: Option[Enumeration#Value]) =
+    new TypedExpressionFactory[Option[A], TOptionEnumValue[A]]
+    with DeOptionizer[String, A, TEnumValue[A], Option[A], TOptionEnumValue[A]] {
+      val deOptionizer = {
+        val e =
+          ev.getOrElse(PrimitiveTypeSupport.DummyEnum.DummyEnumerationValue)
+        enumValueTEF[A](e)
+      }
+    }
 
   override implicit def enumValueToTE[
       A >: Enumeration#Value <: Enumeration#Value](
       e: A): TypedExpression[A, TEnumValue[A]] =
     enumValueTEF[A](e).create(e)
+
+  override implicit def optionEnumcValueToTE[
+      A >: Enumeration#Value <: Enumeration#Value](
+      e: Option[A]): TypedExpression[Option[A], TOptionEnumValue[A]] =
+    optionEnumValueTEF[A](e).create(e)
 }
 
-object MyTypes extends MyTypes
 import MyTypes._
 
 object Schema1 extends Schema {
@@ -87,11 +104,15 @@ object Main extends App {
     Schema1.printDdl
     Schema1.create
 
-    val i1 = PolicyViewItem1(name = "name1", policyType = "FP")
+    val i1 = PolicyViewItem1(name = "name1",
+                             policyType = "FP",
+                             maybePolicyType = Some("VP"))
     items1.insert(i1)
 
     val i2 =
-      PolicyViewItem2(name = "name2", policyType = PolicyTypeViewItem.Fixed)
+      PolicyViewItem2(name = "name2",
+                      policyType = PolicyTypeViewItem.Fixed,
+                      maybePolicyType = Some(PolicyTypeViewItem.Variable))
     items2.insert(i2) // Should save same record as above
 
     val found1 = items1.allRows.toList
